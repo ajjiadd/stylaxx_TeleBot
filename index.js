@@ -1,81 +1,50 @@
-require('dotenv').config();
-const express = require('express');
-const TelegramBot = require('node-telegram-bot-api');
-const { Reminder, sequelize } = require('./models/reminder');
-const cron = require('node-cron');
+const TelegramBot = require("node-telegram-bot-api");
+const express = require("express");
+const bodyParser = require("body-parser");
+require("dotenv").config();
 
+const TOKEN = process.env.TOKEN;
+const bot = new TelegramBot(TOKEN);
 const app = express();
-const bot = new TelegramBot(process.env.TOKEN, { polling: true });
 
+// Middleware
+app.use(bodyParser.json());
+
+// Set Webhook URL
+const WEBHOOK_URL = `https://your-app-name.onrender.com/${TOKEN}`;
+bot.setWebHook(WEBHOOK_URL);
+
+// Handle incoming messages
+app.post(`/${TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
+
+// Bot Commands
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 'Welcome! Use /add [message] [time] (YYYY-MM-DD HH:mm) to set a reminder.');
+    bot.sendMessage(msg.chat.id, "Welcome! You can set reminders using /addreminder.");
 });
 
-bot.onText(/\/add (.+) (\d{4}-\d{2}-\d{2} \d{2}:\d{2})/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const message = match[1];
-  const time = match[2];
+bot.onText(/\/addreminder (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const reminder = match[1];
 
-  try {
-    await Reminder.create({ chat_id: chatId, message, time });
-    bot.sendMessage(chatId, `Reminder added: "${message}" at ${time}`);
-  } catch (error) {
-    bot.sendMessage(chatId, 'Failed to add reminder.');
-  }
+    // Here, you'd normally save the reminder in PostgreSQL
+    bot.sendMessage(chatId, `✅ Reminder added: ${reminder}`);
 });
 
-bot.onText(/\/list/, async (msg) => {
-  const chatId = msg.chat.id;
-  const reminders = await Reminder.findAll({ where: { chat_id: chatId } });
-
-  if (reminders.length === 0) {
-    bot.sendMessage(chatId, 'No reminders set.');
-  } else {
-    const reminderList = reminders.map(r => `${r.id}. ${r.message} - ${r.time}`).join("\n");
-    bot.sendMessage(chatId, `Your Reminders:\n${reminderList}`);
-  }
+bot.onText(/\/listreminders/, (msg) => {
+    // Here, you'd normally fetch reminders from PostgreSQL
+    bot.sendMessage(msg.chat.id, "📋 Your reminders:\n1. Example reminder");
 });
 
-bot.onText(/\/delete (\d+)/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const id = match[1];
-
-  const deleted = await Reminder.destroy({ where: { id, chat_id: chatId } });
-
-  if (deleted) {
-    bot.sendMessage(chatId, 'Reminder deleted.');
-  } else {
-    bot.sendMessage(chatId, 'Reminder not found.');
-  }
+// Webhook Test Route
+app.get("/", (req, res) => {
+    res.send("Telegram Bot is running!");
 });
 
-bot.onText(/\/update (\d+) (.+) (\d{4}-\d{2}-\d{2} \d{2}:\d{2})/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const id = match[1];
-  const newMessage = match[2];
-  const newTime = match[3];
-
-  const updated = await Reminder.update(
-    { message: newMessage, time: newTime },
-    { where: { id, chat_id: chatId } }
-  );
-
-  if (updated[0] > 0) {
-    bot.sendMessage(chatId, 'Reminder updated.');
-  } else {
-    bot.sendMessage(chatId, 'Reminder not found.');
-  }
+// Start Express Server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Bot is running on port ${PORT}`);
 });
-
-// Cron job to send reminders
-cron.schedule('* * * * *', async () => {
-  const now = new Date();
-  const reminders = await Reminder.findAll({ where: { time: { [Sequelize.Op.lte]: now } } });
-
-  reminders.forEach(async (reminder) => {
-    bot.sendMessage(reminder.chat_id, `Reminder: ${reminder.message}`);
-    await Reminder.destroy({ where: { id: reminder.id } }); // Delete after sending
-  });
-});
-
-app.listen(3000, () => console.log('Server running on port 3000'));
